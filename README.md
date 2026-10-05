@@ -1,43 +1,58 @@
-# **Face Recognition System Security Evaluation**
+# 🛡️ Face Recognition System Security Evaluation
+This project focuses on **assessing the resilience of a deep learning-based face recognition system** against adversarial attacks, and investigating effective defensive strategies. By applying subtle, often imperceptible perturbations to input images, the project demonstrates how machine learning models can be deceived, explores the transferability of these attacks across different architectures, and implements a robust defense mechanism to mitigate these vulnerabilities.
 
-This project focuses on **assessing the resilience of a face recognition-based access control system** against adversarial attacks and investigating effective defensive strategies. The project involves several key stages, starting with the selection of **100 identities from the VGG-Face2 dataset’s training set** and the creation of a test set comprising at least **1000 images** (with a minimum of 10 images per identity). 
+---
 
-## **Notebooks**
-Below are detailed explanations of the various Python modules included in the folder:
+## 📚 Project Overview & Methodology
 
-- **`nn1.ipynb`**: Provides the code for producing the security evaluation curves for the NN1 network.
-- **`nn2_resnet50.ipynb`**: Provides the code used to evaluate the performance of the nn2 classifier on a clean test set.
-- **`transferability.ipynb`**: Provides the code for analyzing the transferability of attacks from the NN1 network to the NN2 network.
-- **`defense.ipynb`**: Provides the code for constructing the adversarial samples dataset and training adversarial sample detectors.
+The evaluation is structured into four primary phases, systematically analyzing the threat model and the corresponding countermeasures.
 
-Each notebook is furthermore divided in specific sections, so that it could be helpful for the user who wants to run all the code within.
+### 1. Preliminary Assessment & Dataset Construction
+To ensure an unbiased evaluation, we constructed a representative test set and established a strong baseline.
+* **Dataset:** We extracted a clean test set of 1,000 images, randomly selecting 10 samples for each of the 100 distinct identities chosen from the VGG-Face2 dataset.
+* **Preprocessing:** Images were aligned and cropped using the MTCNN algorithm. We configured MTCNN with a `margin=32` and `selection_method="center_weighted_size"` to prioritize the largest and most central faces, resizing outputs to 160x160 pixels and normalizing values between -1 and 1.
+* **Surrogate Model (NN1):** The primary target is an **Inception ResNetV1** (FaceNet) model. With the MTCNN preprocessing applied, this baseline model achieved an impressive initial accuracy of **95.80%** on our clean test set.
 
-## **Folders**
-- **`attacks`**: This folder contains all the plots of the adversarial attacks performed on both the nn1 and nn2 networks, each organized in their respective subdirectories for clarity and comparison.
+### 2. Adversarial Attack Generation (Grey-Box)
+Using the **Adversarial Robustness Toolbox (ART)** via a Keras wrapper, we generated adversarial examples targeting NN1. We utilized `Categorical-Crossentropy` as a surrogate loss function since the original `Triplet Loss` is non-standard in ART. We evaluated both *Targeted* and *Untargeted* attacks, generally restricting maximum perturbation ($L_{\infty}$) to 5-10%:
 
--**`datasets`**: This directory includes all the datasets used for generating adversarial attacks as well as for evaluating the performance of the models and detectors. 
+* **FGSM (Fast Gradient Sign Method):** Evaluated with $\epsilon$ from 0 to 0.1. The untargeted variant aggressively dropped correct predictions from 958 to just 11. Targeted FGSM struggled to force the specific target class, achieving only 172 successful targeted misclassifications at maximum perturbation.
+* **BIM (Basic Iterative Method):** Applied iteratively with step constraints. The targeted attack was highly successful here: at $\epsilon=0.05$, correct predictions plummeted to 0, and all 1,000 samples were successfully forced into the target class.
+* **PGD (Projected Gradient Descent):** Projecting perturbations onto an $\epsilon$-ball, this attack proved exceptionally lethal. In the targeted scenario, it reached 1,000/1,000 target misclassifications with relatively low perturbation values, demonstrating precise output manipulation.
+* **Carlini-Wagner (C&W):** We tested both aggressive (`max_iter=1`, `learning_rate=0.1`) and cautious (`max_iter=7`, `learning_rate=0.05`) approaches using $L_2$ and $L_{\infty}$ norms. The untargeted cautious approach successfully balanced minimal perturbation (0.0500) with severe accuracy degradation.
+* **DeepFool:** This geometric approach calculates the optimal direction to cross decision boundaries. Testing with `nb_grads=12` yielded the best compromise, offering highly precise perturbations (average 0.15) while keeping the majority of images within the $L_{\infty}$ constraints.
 
-### **Initial Phase: Accuracy Evaluation**
+### 3. Transferability Evaluation
+To understand the real-world threat, we tested the transferability of the generated adversarial samples on a completely different secondary classifier (**NN2**).
+* **Target Model (NN2):** A 50-layer **ResNet50** architecture from the Keras `vggface` library, pre-trained on VGGFace, boasting a clean baseline accuracy of 94.40%.
+* **Preprocessing Adaptation:** Adversarial images were rescaled to [0, 255], resized to 224x224, and reordered via the `preprocess_input` function before feeding into NN2.
+* **Findings:** The NN2 model showed high resilience to *Targeted* attacks transferred from NN1 (e.g., targeted BIM failed completely at 100 iterations). However, *Untargeted* attacks transferred exceptionally well. Untargeted BIM, for instance, dropped NN2's accuracy from 944 to just 76 correctly classified samples.
 
-The initial phase evaluates the **accuracy of a face recognition network** (referred to as `NN1`) on this constructed test set. This phase is crucial for establishing a baseline performance measure against which the impact of adversarial attacks will be assessed.
+### 4. Defense Mechanisms: Adversarial Detector
+To secure the system, we implemented a robust **Adversarial Sample Detector**.
+* **Dataset & Architecture:** We trained a binary classifier using a ResNet50 backbone (initialized with ImageNet weights) on a perfectly balanced dataset of 2,000 images: 1,000 clean samples and 1,000 adversarial samples (mixed attacks, targeted and untargeted). Training ran for 30 epochs with a batch size of 32.
+* **Performance Metrics:** The detector achieved an outstanding **F1-score of 0.93**. It successfully identified 92% of the adversarial samples (True Negatives) while maintaining a low False Positive rate, misclassifying only 6.5% of clean images as adversarial.
+* **System Improvement:** Integrating this detector as a defensive filter dramatically restored the original classifier's reliability. Overall accuracy against adversarial datasets surged from a highly compromised 48.75% to a secure **87.44%**.
 
+---
 
-### **Adversarial Attacks**
+## 📁 Repository Structure
 
-Subsequently, **adversarial examples** will be generated using the `ART` library, targeting `NN1`. The impact of these adversarial examples will be assessed using **Security Evaluation Curves**. These curves will provide a visual representation of the system's vulnerability to adversarial attacks.
+The codebase is organized to cleanly separate the core evaluation notebooks from the generated data, output visual analytics, and the trained defense models.
 
+### 📓 Core Notebooks
+* `nn1.ipynb`: Code for generating adversarial attacks (FGSM, BIM, PGD, C&W, DeepFool) via ART, calculating test set performance, and plotting security evaluation curves for the Inception ResNetV1 model.
+* `nn2_resnet50.ipynb`: Code to load and evaluate the baseline performance of the secondary ResNet50 classifier on the clean test set.
+* `transferability.ipynb`: Pipeline for passing the adversarial images generated in `nn1` through the `nn2` model to analyze attack transferability.
+* `defense.ipynb`: Contains the dataset generation logic, architecture setup, and training loop for the ResNet50 binary adversarial detector.
 
-### **Transferability Evaluation**
+### 📂 Directories
+* **`attacks/`**: Stores all exported data and plots (.pkl, .png, .jpg), including Security Evaluation Curves (SEC) and Perturbation Curves (PER), systematically organized by attack type (BIM, CW, DeepFool, FGSM, PGD) and target model (`nn1` or `nn2`).
+* **`datasets/`**: Contains the raw and processed data used throughout the project.
+* **`detector/`**: Contains the artifacts of the trained ResNet50 adversarial sample detector, including the saved weights, loss/accuracy logs, and cross-validation indices.
+* **`paper/`**: Contains the official project documentation (`Report.pdf`) and the assignment specifications.
 
-An additional classifier, trained on the VGG-Face2 dataset, will be chosen and evaluated on the "clean" test set to study the **transferability of adversarial examples** to this second classifier (`NN2`). This step is essential for understanding how adversarial examples affect different models and to what extent adversarial vulnerabilities are shared across classifiers.
+---
 
-
-### **Defense Mechanisms**
-
-Finally, the project includes the **implementation and evaluation of at least one defense mechanism**. The effectiveness of these defense strategies will be measured by their ability to mitigate the impact of adversarial attacks and maintain the system's accuracy.
-
-## **Group 9 - Members**
-- Lamb Giovanni
-- Orlando Palma 
-- Saturnino Fabrizio 
-- Zottarelli Egidio
+**Authors (Group 9):** Giovanni Lamb, Palma Orlando, Fabrizio Saturnino, Egidio Zottarelli
+**Institution:** University of Salerno, Department of Information Engineering, Electrical Engineering and Applied Mathematics
